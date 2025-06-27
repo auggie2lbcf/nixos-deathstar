@@ -1,403 +1,174 @@
 # NixOS Deathstar Networking Lab 🚀
 
-> A comprehensive NixOS-based home lab featuring AI model hosting, cloud storage, and secure remote access via Cloudflare tunnels.
+> **Easy Setup Version 3.0** - A comprehensive NixOS-based home lab featuring AI model hosting, cloud storage, and secure remote access via Cloudflare tunnels.
 
-## 🎯 What You'll Build
+## 🎯 What You'll Get
 
-- **🤖 AI Services Hub**: Ollama, Open WebUI, Text Generation WebUI, Stable Diffusion
+- **🤖 AI Services Hub**: Ollama + Open WebUI for ChatGPT-like interface
 - **☁️ Private Cloud**: Nextcloud with MySQL and Redis
-- **🎮 Gaming Workstation**: KDE desktop with Steam and gaming optimizations
-- **🔒 Secure Access**: Cloudflare tunnels (no open firewall ports)
+- **🎮 Gaming Workstation**: KDE desktop with Steam support
+- **🔒 Secure Access**: Cloudflare tunnels (no firewall configuration needed)
 - **📦 Container Platform**: Podman for service orchestration
-- **💾 Optimized Storage**: SSD (OS), HDD (AI models), NVME (cloud storage)
+- **🛠️ Easy Management**: Simple commands for all operations
 
-## 📋 Hardware Requirements
+## 🚀 Super Easy Installation
 
-### Required Storage Devices
-- **SSD** (`/dev/sdb`) - 250GB+ for boot and NixOS root
-- **HDD** (`/dev/sda`) - 1TB+ for AI model storage  
-- **NVME** (`/dev/nvme0n1`) - 500GB+ for Nextcloud data
+### Step 1: Install NixOS Normally
+1. Download NixOS ISO from [nixos.org](https://nixos.org/download.html)
+2. Boot from USB and run the **graphical installer**
+3. Install NixOS normally with your preferred settings
+4. Reboot into your new NixOS system
 
-### Recommended Specs
-- **CPU**: Intel/AMD with 8+ cores (AI workloads benefit from more cores)
-- **RAM**: 32GB+ (AI models are memory-hungry)
-- **GPU**: AMD Radeon (for gaming and AI acceleration)
-- **Network**: Gigabit ethernet (for model downloads and streaming)
-
-## 🌐 Prerequisites
-
-### 1. Domain & Cloudflare Setup
-- **Domain**: You need a domain (e.g., `yourdomain.com`) managed by Cloudflare
-- **Cloudflare Account**: Free tier works fine
-- **API Token**: Required for tunnel creation ([Get Token Guide](#cloudflare-api-token))
-
-### 2. NixOS Installer
-- Download latest NixOS ISO from [nixos.org](https://nixos.org/download.html)
-- Create bootable USB drive
-- Boot from installer
-
-## 🚀 Quick Start Installation
-
-### Step 1: Boot NixOS Installer
-Boot from your NixOS installer USB and ensure you have internet connectivity.
-
-### Step 2: Download and Run Setup Script
+### Step 2: Run the Easy Setup Script
 ```bash
-# Download the latest setup script
-curl -L https://raw.githubusercontent.com/auggie2lbcf/nixos-deathstar/main/setup.sh -o setup.sh
-chmod +x setup.sh
-
-# Set your configuration repository (optional - uses default if not set)
-export CONFIG_REPO="https://github.com/auggie2lbcf/nixos-deathstar.git"
-
-# Run the installation
-sudo ./setup.sh
+# Download and run the setup script
+curl -L https://raw.githubusercontent.com/yourusername/nixos-deathstar/main/easy-setup.sh -o easy-setup.sh
+chmod +x easy-setup.sh
+./easy-setup.sh
 ```
 
-### Step 3: Follow the Interactive Setup
-The script will:
-1. ✅ Validate your hardware and environment
-2. 💽 Partition and format your storage devices
-3. 📦 Download NixOS configuration files
-4. 🔐 Securely collect your passwords and API tokens
-5. 🔧 Install and configure NixOS
-6. 🎯 Prepare post-installation setup
+**That's it!** The script handles everything else automatically.
 
-### Step 4: Reboot and Complete Setup
-```bash
-# After installation completes, reboot
-sudo reboot
+## 📋 What You'll Need
 
-# Login as 'vader' (you'll set this password during installation)
-# Run the post-installation script
-./post-install-setup.sh
-```
+### Required Information
+- **Domain Name**: Any domain managed by Cloudflare (free tier works)
+- **Cloudflare API Token**: Get from [Cloudflare Dashboard](https://dash.cloudflare.com/profile/api-tokens)
+- **Passwords**: Admin password for Nextcloud and database
 
-## 🔧 Advanced Installation Options
+### Hardware (Flexible)
+- **CPU**: Any modern processor (8+ cores recommended for AI)
+- **RAM**: 16GB minimum, 32GB+ recommended
+- **Storage**: Works with any storage configuration
+  - Single drive: Everything on main drive
+  - Multiple drives: Optional setup for dedicated AI/Nextcloud storage
+- **GPU**: Optional AMD/NVIDIA for better AI performance
 
-### Custom Device Configuration
-```bash
-# Override default device assignments
-export SSD_DEVICE="/dev/nvme0n1"
-export HDD_DEVICE="/dev/sdb" 
-export NVME_DEVICE="/dev/sdc"
-sudo ./setup.sh
-```
+## 🔑 Getting Your Cloudflare API Token
 
-### Test Mode (Dry Run)
-```bash
-# Test the script without making changes
-export DRY_RUN=true
-sudo ./setup.sh
-```
+1. Go to [Cloudflare API Tokens](https://dash.cloudflare.com/profile/api-tokens)
+2. Click "Create Token"
+3. Use "Cloudflare Tunnels" template or create custom with:
+   - **Account**: `Cloudflare Tunnel:Edit`
+   - **Zone**: `DNS:Edit` + `Zone:Read`
+4. Save the token (you only see it once!)
 
-### Resume Installation
-```bash
-# Skip partitioning if already done
-export SKIP_PARTITIONING=true
-sudo ./setup.sh
-```
+## 🎮 What Gets Installed
 
-### Unattended Installation
-```bash
-# Skip confirmations (use with caution!)
-export FORCE_FORMAT=true
-sudo ./setup.sh
-```
+### Core Services
+- **Ollama**: Local AI model hosting
+- **Open WebUI**: ChatGPT-like web interface
+- **Nextcloud**: Your private cloud storage
+- **Cloudflare Tunnels**: Secure external access
 
-## 🔑 Required Secrets
+### Optional Gaming Setup
+- **KDE Plasma**: Modern desktop environment
+- **Steam**: Full gaming platform with Proton
+- **Gaming Tools**: MangoHud, GameMode for performance
 
-During installation, you'll be prompted for:
-
-### Cloudflare API Token
-- **Purpose**: Creates secure tunnels for external access
-- **How to get**: [Follow this guide](#cloudflare-api-token)
-- **Permissions needed**: `Cloudflare Tunnel:Edit`, `DNS:Edit`, `Zone:Read`
-
-### Nextcloud Admin Password
-- **Purpose**: Admin login for your private cloud
-- **Requirements**: Use a strong password
-- **Usage**: Login to `https://yoursubdomain.yourdomain.com`
-
-### Nextcloud Database Password  
-- **Purpose**: MySQL database security
-- **Requirements**: Use a different password than admin
-- **Usage**: Handled automatically by the system
+### Development Tools
+- **Podman**: Container management
+- **Git, Python**: Development essentials
+- **System Tools**: htop, btop, monitoring tools
 
 ## 🌐 Service URLs
 
-After successful setup, your services will be available at:
+After setup, access your services at:
 
 | Service | URL | Description |
 |---------|-----|-------------|
-| 🤖 **AI Hub** | `https://c3p0.yourdomain.com` | Open WebUI interface for AI models |
-| ☁️ **Nextcloud** | `https://scarif.yourdomain.com` | Your private cloud storage |
-| 🔧 **Ollama API** | `https://c3p0.yourdomain.com/ollama/` | Direct API access |
-| 🎨 **Stable Diffusion** | `https://c3p0.yourdomain.com/sd/` | Image generation (manual start) |
-| 📝 **Text Generation** | `https://c3p0.yourdomain.com/textgen/` | Advanced text models (manual start) |
+| 🤖 **AI Chat** | `https://c3p0.yourdomain.com` | ChatGPT-like interface |
+| ☁️ **Nextcloud** | `https://scarif.yourdomain.com` | Private cloud storage |
 
 ## 🛠 Management Commands
 
-### AI Services
+The setup creates simple commands for managing your lab:
+
+### Main Management
 ```bash
-# Check status of all AI services
-ai-status
-
-# Download new AI models
-ai-pull-model llama2
-ai-pull-model mistral
-ai-pull-model codellama:13b
-
-# Start optional services
-ai-start-textgen    # Text Generation WebUI
-ai-start-sd         # Stable Diffusion WebUI
+deathstar-manage status    # Check all services
+deathstar-manage restart   # Restart everything
+deathstar-manage logs      # View recent logs
+deathstar-manage update    # Update system
 ```
 
-### Cloudflare Tunnels
+### AI Management
 ```bash
-# Check tunnel connectivity
-cf-tunnel-status
-
-# Test all endpoints
-cf-test-endpoints
-
-# Restart tunnels if needed
-cf-restart-tunnels
-
-# Setup helper (if manual config needed)
-cf-setup-tunnel
+ai-status                  # Check AI services
+ai-pull-model llama2       # Download AI models
+ai-pull-model codellama    # Download coding assistant
+ai-pull-model mistral      # Download Mistral model
 ```
 
-### System Management
+### Cloudflare Management
 ```bash
-# Update system configuration
-sudo nixos-rebuild switch
-
-# View service logs
-journalctl -u cloudflared-ai
-journalctl -u cloudflared-nextcloud
-podman logs ollama
-
-# Check system resources
-htop
-df -h
+cf-tunnel-status          # Check tunnel status
+cf-test-endpoints         # Test connectivity
+cf-restart-tunnels        # Restart tunnels
 ```
 
-## 📁 Storage Layout
+## 📁 Storage Options
 
-```
-/                           # SSD - Fast OS and applications
-├── boot/                   # EFI boot partition
-├── nix/                    # Nix store (packages)
-├── etc/nixos/              # System configuration
-└── home/vader/             # User home directory
+The setup automatically detects your storage and offers options:
 
-/mnt/ai-models/             # HDD - Large AI model storage
-├── models/                 # Ollama models
-├── stable-diffusion/       # SD models and outputs
-├── text-generation/        # TextGen models
-└── backups/                # AI model backups
+### Option 1: Single Drive (Default)
+- Everything on your main NixOS drive
+- Perfect for most home labs
+- Automatically creates organized directories
 
-/mnt/nextcloud/             # NVME - High-performance cloud storage
-├── data/                   # Nextcloud user data
-└── backups/                # Daily database backups
-```
+### Option 2: Multiple Drives
+- Dedicated drive for AI models (large files)
+- Dedicated drive for Nextcloud (fast access)
+- Setup wizard guides you through the process
+
+### Option 3: Custom Setup
+- Use existing partitions
+- Mix of local and network storage
+- Advanced users can customize paths
 
 ## 🔧 Customization
 
-### Adding New AI Models
+### Adding AI Models
 ```bash
-# List available models
-curl http://localhost:11434/api/tags
-
-# Download specific models
-ai-pull-model mistral:7b
-ai-pull-model llama2:70b
-ai-pull-model codellama:python
+# Popular models to try
+ai-pull-model llama2:7b        # General chat (4GB)
+ai-pull-model codellama:7b     # Code assistant (4GB)
+ai-pull-model mistral:7b       # Fast and capable (4GB)
+ai-pull-model llama2:13b       # Better quality (7GB)
+ai-pull-model dolphin-mistral  # Uncensored model (4GB)
 ```
 
-### Changing Service Domains
-1. Edit `/etc/nixos/services/cloudflare-tunnel.nix`
-2. Update domain names in configuration
-3. Rebuild: `sudo nixos-rebuild switch`
+### Changing Domains
+1. Edit `/etc/nixos/services/*.nix` files
+2. Update your domain name
+3. Run: `sudo nixos-rebuild switch`
 4. Update DNS records in Cloudflare
 
-### Adding New Services
-1. Create new service file in `/etc/nixos/services/`
-2. Add container definition or service configuration
-3. Import in `/etc/nixos/configuration.nix`
-4. Rebuild and restart services
+### Adding Services
+The modular design makes it easy to add new services:
+1. Create service file in `/etc/nixos/services/`
+2. Import in `/etc/nixos/configuration.nix`
+3. Rebuild: `sudo nixos-rebuild switch`
 
 ## 🛡 Security Features
 
 - ✅ **Zero Open Ports**: All access via Cloudflare tunnels
-- ✅ **Encrypted Storage**: Full disk encryption available
-- ✅ **Secrets Management**: Passwords stored securely
-- ✅ **Minimal Attack Surface**: Only required services enabled
-- ✅ **Automatic Updates**: NixOS declarative configuration
-- ✅ **Container Isolation**: Services run in isolated containers
+- ✅ **Encrypted Tunnels**: All traffic secured by Cloudflare
+- ✅ **Isolated Services**: Containers provide separation
+- ✅ **Secure Secrets**: Passwords stored safely
+- ✅ **Automatic Updates**: Easy system maintenance
 
-## 🔄 Backup Strategy
+## 🔄 Backup & Maintenance
 
-### Automated Backups
+### Automatic Backups
 - **Nextcloud**: Daily database and config backups
-- **AI Models**: Weekly model backups (large files)
-- **System Config**: Version controlled in git
+- **AI Models**: Weekly backups (models are large)
+- **System Config**: Version controlled via git
 
-### Manual Backup Commands
+### Manual Maintenance
 ```bash
-# Backup Nextcloud immediately
-sudo systemctl start nextcloud-backup
+# Update everything
+deathstar-manage update
 
-# Backup AI models
-sudo systemctl start ai-models-backup
-
-# Export NixOS configuration
-sudo tar -czf nixos-config-backup.tar.gz /etc/nixos/
-```
-
-## 🎮 Gaming Features
-
-Included gaming setup:
-- **Desktop**: KDE Plasma with gaming optimizations
-- **Steam**: Full Steam client with Proton support
-- **Performance**: GameMode and Gamescope for better performance
-- **Monitoring**: MangoHud for FPS and system stats
-- **Hardware**: AMD GPU drivers with Vulkan support
-
-## 📚 Cloudflare API Token
-
-### Getting Your Token
-1. **Visit**: [Cloudflare API Tokens](https://dash.cloudflare.com/profile/api-tokens)
-2. **Create**: "Create Token"
-3. **Template**: Use "Cloudflare Tunnels" template
-4. **Configure**:
-   - Token name: `NixOS Deathstar Lab`
-   - Account: Your account
-   - Zone: Your domain
-5. **Permissions**:
-   - Account: `Cloudflare Tunnel:Edit`
-   - Zone: `DNS:Edit` + `Zone:Read`
-6. **Copy**: Save the token (you only see it once!)
-
-### Token Verification
-```bash
-curl -X GET "https://api.cloudflare.com/client/v4/user/tokens/verify" \
-     -H "Authorization: Bearer YOUR_TOKEN_HERE" \
-     -H "Content-Type:application/json"
-```
-
-## 🐛 Troubleshooting
-
-### Common Issues
-
-#### "Device not found" errors
-```bash
-# Check available devices
-lsblk
-
-# Override device paths
-export SSD_DEVICE="/dev/your-ssd"
-export HDD_DEVICE="/dev/your-hdd"
-export NVME_DEVICE="/dev/your-nvme"
-```
-
-#### Tunnels not connecting
-```bash
-# Check tunnel status
-cf-tunnel-status
-
-# Restart tunnels
-cf-restart-tunnels
-
-# Check logs
-journalctl -u cloudflared-ai
-```
-
-#### AI services not starting
-```bash
-# Check container status
-podman ps -a
-
-# Check AI service status
-ai-status
-
-# Restart AI services
-sudo systemctl restart podman
-```
-
-#### Mount failures
-```bash
-# Check filesystem labels
-ls -la /dev/disk/by-label/
-
-# Check mounts
-df -h | grep mnt
-
-# Remount if needed
-sudo mount -a
-```
-
-### Getting Help
-
-1. **Check logs**: `journalctl -xe`
-2. **Verify config**: `sudo nixos-rebuild dry-run`
-3. **Test connectivity**: `cf-test-endpoints`
-4. **Resource usage**: `htop` and `df -h`
-
-## 🔄 Updates and Maintenance
-
-### System Updates
-```bash
-# Update NixOS
-sudo nixos-rebuild switch
-
-# Update containers
-podman auto-update
-```
-
-### Configuration Changes
-1. Edit files in `/etc/nixos/`
-2. Test: `sudo nixos-rebuild dry-run`
-3. Apply: `sudo nixos-rebuild switch`
-
-### Model Management
-```bash
-# Clean old models
-ollama rm old-model-name
-
-# Update to newer versions
-ai-pull-model llama2:latest
-```
-
-## 🤝 Contributing
-
-1. Fork the repository
-2. Create feature branch: `git checkout -b feature-name`
-3. Test your changes thoroughly
-4. Submit pull request with clear description
-
-## 📄 License
-
-This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
-
-## 🙏 Acknowledgments
-
-- **NixOS Community** for the excellent declarative OS
-- **Ollama Team** for making AI models accessible
-- **Cloudflare** for secure tunnel technology
-- **Open Source Contributors** for all the amazing tools
-
----
-
-## 🚀 Ready to Deploy?
-
-```bash
-curl -L https://raw.githubusercontent.com/auggie2lbcf/nixos-deathstar/main/setup.sh | sudo bash
-```
-
-**May the Force be with your deployments!** ⭐
-
----
-
-*Last updated: $(date +%Y-%m-%d) | Version: 2.0*
+# Backup now
+sudo systemctl start next
