@@ -413,10 +413,34 @@ install_nixos() {
 setup_user() {
     log "Setting up user account..."
     
-    prompt "Please set password for user 'vader':"
-    nixos-enter --root /mnt -c "passwd vader"
-    
-    success "User account configured"
+    # Check if user exists in the new system
+    if nixos-enter --root /mnt -c "id vader" &>/dev/null; then
+        prompt "Please set password for user 'vader':"
+        nixos-enter --root /mnt -c "passwd vader"
+        success "User account configured"
+    else
+        warn "User 'vader' not found in installed system"
+        log "This will be handled in the post-install script"
+        
+        # Create a script to set password on first boot
+        cat > /mnt/etc/nixos/setup-user-password.sh << 'EOF'
+#!/bin/bash
+# Set password for vader user on first boot
+if id vader &>/dev/null; then
+    echo "Setting password for user 'vader':"
+    passwd vader
+    # Remove this script after running
+    rm -f /etc/nixos/setup-user-password.sh
+else
+    echo "User 'vader' still not found"
+    exit 1
+fi
+EOF
+        chmod +x /mnt/etc/nixos/setup-user-password.sh
+        
+        warn "You'll need to set the user password after reboot"
+        warn "Run: sudo /etc/nixos/setup-user-password.sh"
+    fi
 }
 
 create_post_install_script() {
@@ -441,6 +465,12 @@ NC='\033[0m'
 log() { echo -e "${GREEN}[INFO]${NC} $1"; }
 warn() { echo -e "${YELLOW}[WARN]${NC} $1"; }
 error() { echo -e "${RED}[ERROR]${NC} $1"; }
+
+# Check if we need to set user password
+if [ -f "/etc/nixos/setup-user-password.sh" ]; then
+    log "Setting up user password (this was deferred from installation)..."
+    sudo /etc/nixos/setup-user-password.sh
+fi
 
 # Update system
 log "Updating NixOS configuration..."
