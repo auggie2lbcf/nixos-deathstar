@@ -1,12 +1,12 @@
 #!/bin/bash
-# NixOS Deathstar Lab Setup Script v2.0
-# Improved version with better error handling, validation, and flexibility
-# Run this script after booting from NixOS installer
+# NixOS Deathstar Lab Easy Setup Script v3.0
+# Run this AFTER completing the standard NixOS graphical installation
+# This script sets up AI services, Nextcloud, and Cloudflare tunnels
 
 set -e
 
 echo "=========================================="
-echo "  NixOS Deathstar Lab Setup Script v2.0"
+echo "  NixOS Deathstar Lab Easy Setup v3.0"
 echo "=========================================="
 
 # Colors for output
@@ -18,335 +18,345 @@ PURPLE='\033[0;35m'
 CYAN='\033[0;36m'
 NC='\033[0m' # No Color
 
-# Configuration variables
-SCRIPT_VERSION="2.0"
-CONFIG_REPO="${CONFIG_REPO:-https://github.com/auggie2lbcf/nixos-deathstar.git}"
-DRY_RUN="${DRY_RUN:-false}"
-SKIP_PARTITIONING="${SKIP_PARTITIONING:-false}"
-FORCE_FORMAT="${FORCE_FORMAT:-false}"
-
-# Device configuration (can be overridden via environment)
-SSD_DEVICE="${SSD_DEVICE:-/dev/sdb}"
-HDD_DEVICE="${HDD_DEVICE:-/dev/sda}"
-NVME_DEVICE="${NVME_DEVICE:-/dev/nvme0n1}"
-
-# Filesystem labels (shortened to avoid truncation)
-BOOT_LABEL="boot"
-ROOT_LABEL="nixos-root"
-AI_LABEL="ai-storage"
-NEXTCLOUD_LABEL="nextcloud"  # Shortened from nextcloud-storage
+# Configuration
+SCRIPT_VERSION="3.0"
+CONFIG_REPO="https://github.com/auggie2lbcf/nixos-deathstar.git"
+TEMP_DIR="/tmp/nixos-deathstar"
 
 # Helper functions
-log() {
-    echo -e "${GREEN}[INFO]${NC} $1"
-}
-
-warn() {
-    echo -e "${YELLOW}[WARN]${NC} $1"
-}
-
-error() {
-    echo -e "${RED}[ERROR]${NC} $1"
-    exit 1
-}
-
-debug() {
-    echo -e "${BLUE}[DEBUG]${NC} $1"
-}
-
-success() {
-    echo -e "${GREEN}[SUCCESS]${NC} $1"
-}
-
-prompt() {
-    echo -e "${CYAN}[PROMPT]${NC} $1"
-}
+log() { echo -e "${GREEN}[INFO]${NC} $1"; }
+warn() { echo -e "${YELLOW}[WARN]${NC} $1"; }
+error() { echo -e "${RED}[ERROR]${NC} $1"; exit 1; }
+success() { echo -e "${GREEN}[SUCCESS]${NC} $1"; }
+prompt() { echo -e "${CYAN}[PROMPT]${NC} $1"; }
 
 # Validation functions
-check_root() {
-    if [ "$EUID" -ne 0 ]; then
-        error "Please run this script as root (use sudo)"
+check_nixos() {
+    if [ ! -f /etc/nixos/configuration.nix ]; then
+        error "This doesn't appear to be a NixOS system or NixOS isn't properly installed"
     fi
+    success "NixOS installation detected"
 }
 
-check_nixos_installer() {
-    if ! command -v nixos-generate-config &> /dev/null; then
-        error "This script must be run from a NixOS installer environment"
+check_sudo() {
+    if ! sudo -n true 2>/dev/null; then
+        log "This script requires sudo access. You may be prompted for your password."
     fi
 }
 
 check_internet() {
     log "Checking internet connectivity..."
     if ! ping -c 1 google.com &> /dev/null; then
-        error "No internet connection. Please configure networking first."
+        error "No internet connection. Please check your network settings."
     fi
     success "Internet connectivity confirmed"
 }
 
-check_devices() {
-    log "Validating storage devices..."
+# Storage setup functions
+setup_storage_directories() {
+    log "Setting up storage directories..."
     
-    local missing_devices=()
+    # Create mount points for additional storage
+    sudo mkdir -p /mnt/ai-models
+    sudo mkdir -p /mnt/nextcloud
     
-    if [ ! -b "$SSD_DEVICE" ]; then
-        missing_devices+=("SSD: $SSD_DEVICE")
-    fi
+    # Create data directories with proper permissions
+    sudo mkdir -p /var/lib/ai-models
+    sudo mkdir -p /var/lib/nextcloud
     
-    if [ ! -b "$HDD_DEVICE" ]; then
-        missing_devices+=("HDD: $HDD_DEVICE")
-    fi
+    # Set ownership (will be adjusted by services)
+    sudo chown $USER:users /var/lib/ai-models
     
-    if [ ! -b "$NVME_DEVICE" ]; then
-        missing_devices+=("NVME: $NVME_DEVICE")
-    fi
-    
-    if [ ${#missing_devices[@]} -gt 0 ]; then
-        error "Missing storage devices: ${missing_devices[*]}"
-    fi
-    
-    success "All storage devices found"
+    success "Storage directories created"
 }
 
-show_device_info() {
-    log "Storage device information:"
-    echo "  SSD (OS):         $SSD_DEVICE"
-    echo "  HDD (AI Models):  $HDD_DEVICE"
-    echo "  NVME (Nextcloud): $NVME_DEVICE"
+detect_storage() {
+    log "Detecting available storage devices..."
+    
+    # List available storage devices
+    echo "Available storage devices:"
+    lsblk -d -o NAME,SIZE,TYPE | grep -E "(disk|nvme)"
     echo
     
-    log "Device details:"
-    lsblk "$SSD_DEVICE" "$HDD_DEVICE" "$NVME_DEVICE" 2>/dev/null || true
+    prompt "Storage setup options:"
+    echo "1. Use existing filesystem (recommended for post-install)"
+    echo "2. Setup additional drives for AI models and Nextcloud"
+    echo "3. Skip storage setup (use system drive for everything)"
+    
+    read -p "Choose option (1-3) [1]: " storage_choice
+    storage_choice=${storage_choice:-1}
+    
+    case $storage_choice in
+        1)
+            log "Using existing filesystem with subdirectories"
+            setup_storage_directories
+            ;;
+        2)
+            setup_additional_drives
+            ;;
+        3)
+            log "Skipping additional storage setup"
+            setup_storage_directories
+            ;;
+        *)
+            warn "Invalid choice, using default option 1"
+            setup_storage_directories
+            ;;
+    esac
+}
+
+setup_additional_drives() {
+    log "Setting up additional drives..."
+    echo "Available unmounted drives:"
+    lsblk -f | grep -v "/$\|/boot"
     echo
-}
-
-confirm_destructive_operation() {
-    if [ "$FORCE_FORMAT" = "true" ]; then
-        warn "FORCE_FORMAT=true - Skipping confirmation"
-        return 0
+    
+    read -p "Enter device for AI models (e.g., /dev/sdb) [skip]: " ai_device
+    read -p "Enter device for Nextcloud (e.g., /dev/sdc) [skip]: " nc_device
+    
+    if [ -n "$ai_device" ] && [ -b "$ai_device" ]; then
+        log "Setting up AI models drive: $ai_device"
+        sudo mkfs.ext4 -L ai-storage "$ai_device"
+        sudo mount "$ai_device" /mnt/ai-models
+        echo "LABEL=ai-storage /mnt/ai-models ext4 defaults 0 2" | sudo tee -a /etc/fstab
     fi
     
-    echo -e "${RED}WARNING: This will DESTROY ALL DATA on the following devices:${NC}"
-    echo "  $SSD_DEVICE (SSD)"
-    echo "  $HDD_DEVICE (HDD)"
-    echo "  $NVME_DEVICE (NVME)"
-    echo
-    read -p "Are you absolutely sure you want to continue? (type 'YES' to confirm): " confirmation
-    
-    if [ "$confirmation" != "YES" ]; then
-        log "Operation cancelled by user"
-        exit 0
-    fi
-}
-
-# Utility functions
-unmount_all() {
-    log "Unmounting any existing filesystems..."
-    
-    # Unmount in reverse order (deepest first)
-    umount -R /mnt 2>/dev/null || true
-    
-    # Force unmount specific devices if they're still mounted
-    for device in "${SSD_DEVICE}1" "${SSD_DEVICE}2" "${HDD_DEVICE}1" "${NVME_DEVICE}p1"; do
-        if mountpoint -q "/mnt" 2>/dev/null; then
-            umount "$device" 2>/dev/null || true
-        fi
-    done
-    
-    # Wait for unmounts to complete
-    sleep 2
-    success "Filesystems unmounted"
-}
-
-wait_for_device() {
-    local device="$1"
-    local timeout=10
-    local count=0
-    
-    while [ ! -e "$device" ] && [ $count -lt $timeout ]; do
-        sleep 1
-        ((count++))
-    done
-    
-    if [ ! -e "$device" ]; then
-        error "Device $device did not appear after $timeout seconds"
-    fi
-}
-
-# Partitioning functions
-partition_ssd() {
-    log "Partitioning SSD ($SSD_DEVICE) for boot and main OS..."
-    
-    # Create GPT partition table
-    parted "$SSD_DEVICE" --script mklabel gpt
-    
-    # Create EFI boot partition (512MB)
-    parted "$SSD_DEVICE" --script mkpart ESP fat32 1MiB 513MiB
-    parted "$SSD_DEVICE" --script set 1 esp on
-    
-    # Create root partition (remaining space)
-    parted "$SSD_DEVICE" --script mkpart primary ext4 513MiB 100%
-    
-    # Wait for partitions to appear
-    wait_for_device "${SSD_DEVICE}1"
-    wait_for_device "${SSD_DEVICE}2"
-    
-    success "SSD partitioned successfully"
-}
-
-partition_hdd() {
-    log "Partitioning HDD ($HDD_DEVICE) for AI model storage..."
-    
-    # Create GPT partition table
-    parted "$HDD_DEVICE" --script mklabel gpt
-    
-    # Create single partition for AI storage
-    parted "$HDD_DEVICE" --script mkpart primary ext4 1MiB 100%
-    
-    # Wait for partition to appear
-    wait_for_device "${HDD_DEVICE}1"
-    
-    success "HDD partitioned successfully"
-}
-
-partition_nvme() {
-    log "Partitioning NVME ($NVME_DEVICE) for Nextcloud storage..."
-    
-    # Create GPT partition table
-    parted "$NVME_DEVICE" --script mklabel gpt
-    
-    # Create single partition for Nextcloud storage
-    parted "$NVME_DEVICE" --script mkpart primary ext4 1MiB 100%
-    
-    # Wait for partition to appear
-    wait_for_device "${NVME_DEVICE}p1"
-    
-    success "NVME partitioned successfully"
-}
-
-# Formatting functions
-format_filesystems() {
-    log "Formatting filesystems with appropriate labels..."
-    
-    # Format boot partition (FAT32)
-    log "Formatting boot partition..."
-    mkfs.fat -F 32 -n "$BOOT_LABEL" "${SSD_DEVICE}1"
-    
-    # Format root partition (ext4)
-    log "Formatting root partition..."
-    mkfs.ext4 -F -L "$ROOT_LABEL" "${SSD_DEVICE}2"
-    
-    # Format AI storage (ext4)
-    log "Formatting AI storage partition..."
-    mkfs.ext4 -F -L "$AI_LABEL" "${HDD_DEVICE}1"
-    
-    # Format Nextcloud storage (ext4)
-    log "Formatting Nextcloud storage partition..."
-    mkfs.ext4 -F -L "$NEXTCLOUD_LABEL" "${NVME_DEVICE}p1"
-    
-    # Trigger udev to update /dev/disk/by-label/
-    udevadm trigger
-    sleep 3
-    
-    success "All filesystems formatted successfully"
-}
-
-verify_labels() {
-    log "Verifying filesystem labels..."
-    
-    local expected_labels=("$BOOT_LABEL" "$ROOT_LABEL" "$AI_LABEL" "$NEXTCLOUD_LABEL")
-    local missing_labels=()
-    
-    for label in "${expected_labels[@]}"; do
-        if [ ! -e "/dev/disk/by-label/$label" ]; then
-            missing_labels+=("$label")
-        fi
-    done
-    
-    if [ ${#missing_labels[@]} -gt 0 ]; then
-        error "Missing filesystem labels: ${missing_labels[*]}"
+    if [ -n "$nc_device" ] && [ -b "$nc_device" ]; then
+        log "Setting up Nextcloud drive: $nc_device"
+        sudo mkfs.ext4 -L nextcloud-storage "$nc_device"
+        sudo mount "$nc_device" /mnt/nextcloud
+        echo "LABEL=nextcloud-storage /mnt/nextcloud ext4 defaults 0 2" | sudo tee -a /etc/fstab
     fi
     
-    success "All filesystem labels verified"
+    success "Additional drives configured"
 }
 
-# Mounting functions
-mount_filesystems() {
-    log "Creating mount points and mounting filesystems..."
+# Configuration download and setup
+download_configs() {
+    log "Downloading NixOS configuration files..."
     
-    # Mount root filesystem
-    mount "/dev/disk/by-label/$ROOT_LABEL" /mnt
-    success "Root filesystem mounted"
+    # Clean and create temp directory
+    rm -rf "$TEMP_DIR"
+    git clone "$CONFIG_REPO" "$TEMP_DIR" || error "Failed to download configuration"
     
-    # Create and mount boot
-    mkdir -p /mnt/boot
-    mount "/dev/disk/by-label/$BOOT_LABEL" /mnt/boot
-    success "Boot filesystem mounted"
-    
-    # Create and mount AI storage
-    mkdir -p /mnt/mnt/ai-models
-    mount "/dev/disk/by-label/$AI_LABEL" /mnt/mnt/ai-models
-    success "AI storage mounted"
-    
-    # Create and mount Nextcloud storage
-    mkdir -p /mnt/mnt/nextcloud
-    mount "/dev/disk/by-label/$NEXTCLOUD_LABEL" /mnt/mnt/nextcloud
-    success "Nextcloud storage mounted"
-    
-    # Verify all mounts
-    log "Mount verification:"
-    df -h | grep -E "(Filesystem|/mnt)"
+    success "Configuration files downloaded"
 }
 
-# Configuration functions
-download_configuration() {
-    log "Setting up NixOS configuration files..."
+backup_existing_config() {
+    log "Backing up existing NixOS configuration..."
     
-    # Create configuration directory structure
-    mkdir -p /mnt/etc/nixos/services
-    
-    if [ -n "$CONFIG_REPO" ]; then
-        log "Cloning configuration from $CONFIG_REPO..."
-        
-        # Clone to temporary location
-        if git clone "$CONFIG_REPO" /tmp/nixos-config; then
-            # Copy configuration files
-            cp -r /tmp/nixos-config/*.nix /mnt/etc/nixos/ 2>/dev/null || true
-            cp -r /tmp/nixos-config/services/*.nix /mnt/etc/nixos/services/ 2>/dev/null || true
-            
-            # Copy any additional files
-            cp -r /tmp/nixos-config/.gitignore /mnt/etc/nixos/ 2>/dev/null || true
-            cp -r /tmp/nixos-config/README.md /mnt/etc/nixos/ 2>/dev/null || true
-            
-            success "Configuration files downloaded"
-        else
-            warn "Failed to clone configuration repository"
-            prompt "Please manually copy configuration files to /mnt/etc/nixos/"
-            read -p "Press Enter when configuration files are in place..."
-        fi
-    else
-        warn "No CONFIG_REPO specified"
-        prompt "Please manually copy the following files to /mnt/etc/nixos/:"
-        echo "  - configuration.nix"
-        echo "  - services/nextcloud.nix"
-        echo "  - services/ai-models.nix"
-        echo "  - services/cloudflare-tunnel.nix"
-        read -p "Press Enter when configuration files are in place..."
+    sudo cp /etc/nixos/configuration.nix "/etc/nixos/configuration.nix.backup.$(date +%s)"
+    if [ -f /etc/nixos/hardware-configuration.nix ]; then
+        sudo cp /etc/nixos/hardware-configuration.nix "/etc/nixos/hardware-configuration.nix.backup.$(date +%s)"
     fi
+    
+    success "Existing configuration backed up"
+}
+
+create_modular_config() {
+    log "Creating modular NixOS configuration..."
+    
+    # Create services directory
+    sudo mkdir -p /etc/nixos/services
+    
+    # Copy service configurations
+    sudo cp "$TEMP_DIR/ai_models_service.nix" /etc/nixos/services/ai-models.nix
+    sudo cp "$TEMP_DIR/nextcloud_service.nix" /etc/nixos/services/nextcloud.nix
+    sudo cp "$TEMP_DIR/cloudflare_tunnel_service.nix" /etc/nixos/services/cloudflare-tunnel.nix
+    
+    # Create enhanced configuration.nix that imports existing hardware config
+    sudo tee /etc/nixos/configuration.nix > /dev/null << 'EOF'
+# Enhanced NixOS Configuration for Deathstar Lab
+# This configuration adds AI services, Nextcloud, and Cloudflare tunnels
+# to your existing NixOS installation
+
+{ config, pkgs, lib, ... }:
+
+{
+  imports = [
+    ./hardware-configuration.nix
+    ./services/ai-models.nix
+    ./services/nextcloud.nix
+    ./services/cloudflare-tunnel.nix
+  ];
+
+  # Boot configuration
+  boot.loader.systemd-boot.enable = lib.mkDefault true;
+  boot.loader.efi.canTouchEfiVariables = lib.mkDefault true;
+
+  # Networking
+  networking.hostName = lib.mkDefault "deathstar";
+  networking.networkmanager.enable = lib.mkDefault true;
+
+  # Enable flakes
+  nix.settings.experimental-features = [ "nix-command" "flakes" ];
+
+  # Time zone
+  time.timeZone = lib.mkDefault "America/New_York";
+
+  # Locale
+  i18n.defaultLocale = lib.mkDefault "en_US.UTF-8";
+
+  # Enable the X11 windowing system and KDE desktop
+  services.xserver = {
+    enable = lib.mkDefault true;
+    displayManager.sddm.enable = lib.mkDefault true;
+    desktopManager.plasma5.enable = lib.mkDefault true;
+    
+    # AMD GPU support
+    videoDrivers = lib.mkDefault [ "amdgpu" ];
+  };
+
+  # Hardware support
+  hardware = {
+    # GPU support for AI workloads
+    opengl = {
+      enable = true;
+      driSupport = true;
+      driSupport32Bit = true;
+      extraPackages = with pkgs; [
+        amdvlk
+        rocm-opencl-icd
+        rocm-opencl-runtime
+      ];
+    };
+    
+    # Audio
+    pulseaudio.enable = false;
+    bluetooth.enable = lib.mkDefault true;
+  };
+
+  # PipeWire audio
+  security.rtkit.enable = true;
+  services.pipewire = {
+    enable = true;
+    alsa.enable = true;
+    alsa.support32Bit = true;
+    pulse.enable = true;
+    jack.enable = true;
+  };
+
+  # Virtualization for containers
+  virtualisation = {
+    podman = {
+      enable = true;
+      dockerCompat = true;
+      defaultNetwork.settings.dns_enabled = true;
+    };
+    libvirtd.enable = lib.mkDefault false;
+  };
+
+  # Gaming support
+  programs = {
+    steam = {
+      enable = lib.mkDefault true;
+      remotePlay.openFirewall = true;
+      dedicatedServer.openFirewall = true;
+    };
+    gamemode.enable = lib.mkDefault true;
+  };
+
+  # User configuration - create a lab user if it doesn't exist
+  users.users.vader = {
+    isNormalUser = true;
+    description = "Lab User";
+    extraGroups = [ 
+      "networkmanager" 
+      "wheel" 
+      "audio" 
+      "video" 
+      "storage" 
+      "podman"
+    ];
+    shell = pkgs.bash;
+  };
+
+  # Essential packages
+  environment.systemPackages = with pkgs; [
+    # System utilities
+    vim
+    wget
+    curl
+    git
+    htop
+    btop
+    tree
+    unzip
+    
+    # Networking tools
+    nmap
+    
+    # Container tools
+    podman-compose
+    
+    # AI/ML tools
+    python3
+    python3Packages.pip
+    
+    # Cloudflare
+    cloudflared
+    
+    # Gaming (optional)
+    lutris
+    mangohud
+  ];
+
+  # SSH (enable if needed)
+  services.openssh = {
+    enable = lib.mkDefault false;
+    settings = {
+      PasswordAuthentication = lib.mkDefault true;
+      PermitRootLogin = lib.mkDefault "no";
+    };
+  };
+
+  # Firewall
+  networking.firewall = {
+    enable = true;
+    allowedTCPPorts = [ 80 443 ];
+  };
+
+  # Create necessary directories
+  systemd.tmpfiles.rules = [
+    "d /var/lib/ai-models 0755 vader users"
+    "d /var/lib/nextcloud 0755 nextcloud nextcloud"
+    "d /run/secrets 0755 root root"
+    "d /mnt/ai-models 0755 vader users"
+    "d /mnt/nextcloud 0755 nextcloud nextcloud"
+  ];
+
+  # This value determines the NixOS release from which the default
+  # settings for stateful data, like file locations and database versions
+  # on your system were taken. It's perfectly fine and recommended to leave
+  # this value at the release version of the first install of this system.
+  system.stateVersion = lib.mkDefault "23.11";
+}
+EOF
+
+    success "Modular configuration created"
 }
 
 setup_secrets() {
-    log "Setting up secrets directory..."
-    mkdir -p /mnt/run/secrets
+    log "Setting up secrets and credentials..."
     
-    prompt "Please provide the required secrets (passwords will be hidden):"
+    sudo mkdir -p /run/secrets
+    
+    prompt "Please provide the required credentials:"
     echo
+    
+    # Domain configuration
+    read -p "Enter your domain name [thebennett.net]: " domain
+    domain=${domain:-thebennett.net}
+    
+    # Update domain in service files
+    sudo sed -i "s/thebennett\.net/$domain/g" /etc/nixos/services/*.nix
     
     # Cloudflare API Token
     while true; do
         read -s -p "Cloudflare API Token: " cf_token
         echo
         if [ -n "$cf_token" ]; then
-            echo "$cf_token" > /mnt/run/secrets/cloudflare-token
+            echo "$cf_token" | sudo tee /run/secrets/cloudflare-token > /dev/null
             break
         else
             warn "Token cannot be empty. Please try again."
@@ -360,7 +370,7 @@ setup_secrets() {
         read -s -p "Confirm Nextcloud Admin Password: " nc_pass_confirm
         echo
         if [ "$nc_pass" = "$nc_pass_confirm" ] && [ -n "$nc_pass" ]; then
-            echo "$nc_pass" > /mnt/run/secrets/nextcloud-admin-pass
+            echo "$nc_pass" | sudo tee /run/secrets/nextcloud-admin-pass > /dev/null
             break
         else
             warn "Passwords don't match or are empty. Please try again."
@@ -374,7 +384,7 @@ setup_secrets() {
         read -s -p "Confirm Nextcloud Database Password: " nc_db_pass_confirm
         echo
         if [ "$nc_db_pass" = "$nc_db_pass_confirm" ] && [ -n "$nc_db_pass" ]; then
-            echo "$nc_db_pass" > /mnt/run/secrets/nextcloud-db-pass
+            echo "$nc_db_pass" | sudo tee /run/secrets/nextcloud-db-pass > /dev/null
             break
         else
             warn "Passwords don't match or are empty. Please try again."
@@ -382,175 +392,95 @@ setup_secrets() {
     done
     
     # Set secure permissions
-    chmod 600 /mnt/run/secrets/*
+    sudo chmod 600 /run/secrets/*
+    
+    # Store domain for later use
+    echo "$domain" | sudo tee /run/secrets/domain > /dev/null
     
     success "Secrets configured securely"
 }
 
-create_swap() {
-    log "Creating swap file (16GB)..."
+apply_configuration() {
+    log "Applying NixOS configuration..."
+    log "This may take several minutes to download and build packages..."
     
-    # Create 16GB swap file
-    dd if=/dev/zero of=/mnt/swapfile bs=1M count=16384 status=progress
-    chmod 600 /mnt/swapfile
-    mkswap /mnt/swapfile
-    
-    success "Swap file created"
-}
-
-generate_hardware_config() {
-    log "Generating hardware configuration..."
-    nixos-generate-config --root /mnt
-    success "Hardware configuration generated"
-}
-
-install_nixos() {
-    log "Installing NixOS (this may take a while)..."
-    nixos-install --root /mnt
-    success "NixOS installation completed"
-}
-
-setup_user() {
-    log "Setting up user account..."
-    
-    # Check if user exists in the new system
-    if nixos-enter --root /mnt -c "id vader" &>/dev/null; then
-        prompt "Please set password for user 'vader':"
-        nixos-enter --root /mnt -c "passwd vader"
-        success "User account configured"
+    # Test the configuration first
+    if sudo nixos-rebuild dry-build; then
+        log "Configuration test passed, applying changes..."
+        sudo nixos-rebuild switch
+        success "NixOS configuration applied successfully"
     else
-        warn "User 'vader' not found in installed system"
-        log "This will be handled in the post-install script"
-        
-        # Create a script to set password on first boot
-        cat > /mnt/etc/nixos/setup-user-password.sh << 'EOF'
-#!/bin/bash
-# Set password for vader user on first boot
-if id vader &>/dev/null; then
-    echo "Setting password for user 'vader':"
-    passwd vader
-    # Remove this script after running
-    rm -f /etc/nixos/setup-user-password.sh
-else
-    echo "User 'vader' still not found"
-    exit 1
-fi
-EOF
-        chmod +x /mnt/etc/nixos/setup-user-password.sh
-        
-        warn "You'll need to set the user password after reboot"
-        warn "Run: sudo /etc/nixos/setup-user-password.sh"
+        error "Configuration failed to build. Please check the error messages above."
     fi
 }
 
-create_post_install_script() {
-    log "Creating post-install setup script..."
+setup_cloudflare_tunnels() {
+    log "Setting up Cloudflare tunnels..."
     
-    cat > /mnt/home/vader/post-install-setup.sh << 'EOF'
-#!/bin/bash
-# Post-install setup script for Deathstar lab v2.0
+    domain=$(cat /run/secrets/domain)
+    
+    # Login to Cloudflare
+    prompt "Cloudflare tunnel setup requires browser authentication"
+    echo "A browser window will open for Cloudflare login..."
+    read -p "Press Enter to continue..."
+    
+    sudo -u $USER cloudflared tunnel login
+    
+    # Create tunnels
+    log "Creating Cloudflare tunnels..."
+    AI_TUNNEL_ID=$(sudo -u $USER cloudflared tunnel create ai-tunnel 2>&1 | grep -o '[a-f0-9-]\{36\}' | head -1)
+    NC_TUNNEL_ID=$(sudo -u $USER cloudflared tunnel create nextcloud-tunnel 2>&1 | grep -o '[a-f0-9-]\{36\}' | head -1)
+    
+    if [ -z "$AI_TUNNEL_ID" ] || [ -z "$NC_TUNNEL_ID" ]; then
+        error "Failed to create tunnels. Please check your Cloudflare authentication."
+    fi
+    
+    log "AI Tunnel ID: $AI_TUNNEL_ID"
+    log "Nextcloud Tunnel ID: $NC_TUNNEL_ID"
+    
+    # Copy credentials
+    sudo cp "/home/$USER/.cloudflared/$AI_TUNNEL_ID.json" /run/secrets/cloudflare-ai-tunnel.json
+    sudo cp "/home/$USER/.cloudflared/$NC_TUNNEL_ID.json" /run/secrets/cloudflare-nextcloud-tunnel.json
+    sudo chmod 600 /run/secrets/cloudflare-*-tunnel.json
+    
+    # Update tunnel IDs in configuration
+    sudo sed -i "s/\$CLOUDFLARE_AI_TUNNEL_ID/$AI_TUNNEL_ID/g" /etc/nixos/services/cloudflare-tunnel.nix
+    sudo sed -i "s/\$CLOUDFLARE_NEXTCLOUD_TUNNEL_ID/$NC_TUNNEL_ID/g" /etc/nixos/services/cloudflare-tunnel.nix
+    
+    # Create DNS records
+    log "Creating DNS records..."
+    sudo -u $USER cloudflared tunnel route dns ai-tunnel "c3p0.$domain"
+    sudo -u $USER cloudflared tunnel route dns nextcloud-tunnel "scarif.$domain"
+    
+    # Rebuild to apply tunnel configuration
+    log "Applying tunnel configuration..."
+    sudo nixos-rebuild switch
+    
+    success "Cloudflare tunnels configured"
+}
 
-set -e
+start_services() {
+    log "Starting services..."
+    
+    # Enable and start Cloudflare tunnels
+    sudo systemctl enable --now cloudflared-ai
+    sudo systemctl enable --now cloudflared-nextcloud
+    
+    # Start container services
+    sudo systemctl restart podman
+    
+    # Wait for services to initialize
+    log "Waiting for services to start..."
+    sleep 30
+    
+    success "Services started"
+}
 
-echo "=========================================="
-echo "  Post-Install Setup v2.0"
-echo "=========================================="
-
-# Colors
-GREEN='\033[0;32m'
-YELLOW='\033[1;33m'
-RED='\033[0;31m'
-NC='\033[0m'
-
-log() { echo -e "${GREEN}[INFO]${NC} $1"; }
-warn() { echo -e "${YELLOW}[WARN]${NC} $1"; }
-error() { echo -e "${RED}[ERROR]${NC} $1"; }
-
-# Check if we need to set user password
-if [ -f "/etc/nixos/setup-user-password.sh" ]; then
-    log "Setting up user password (this was deferred from installation)..."
-    sudo /etc/nixos/setup-user-password.sh
-fi
-
-# Update system
-log "Updating NixOS configuration..."
-sudo nixos-rebuild switch
-
-# Check if cloudflared is available
-if ! command -v cloudflared &> /dev/null; then
-    error "cloudflared not found. Please ensure it's installed in your NixOS configuration."
-    exit 1
-fi
-
-# Setup Cloudflare tunnels
-log "Setting up Cloudflare tunnels..."
-echo "Follow these steps:"
-echo
-echo "1. Login to Cloudflare (this will open a browser):"
-echo "   cloudflared tunnel login"
-echo
-read -p "Press Enter after completing the login process..."
-
-echo "2. Creating tunnels..."
-AI_TUNNEL_ID=$(cloudflared tunnel create ai-tunnel 2>&1 | grep -o '[a-f0-9-]\{36\}' | head -1)
-NC_TUNNEL_ID=$(cloudflared tunnel create nextcloud-tunnel 2>&1 | grep -o '[a-f0-9-]\{36\}' | head -1)
-
-if [ -z "$AI_TUNNEL_ID" ] || [ -z "$NC_TUNNEL_ID" ]; then
-    error "Failed to create tunnels. Please check your Cloudflare login and try again."
-    exit 1
-fi
-
-echo "AI Tunnel ID: $AI_TUNNEL_ID"
-echo "Nextcloud Tunnel ID: $NC_TUNNEL_ID"
-
-# Copy credentials with error checking
-log "Setting up tunnel credentials..."
-if [ -f "$HOME/.cloudflared/$AI_TUNNEL_ID.json" ]; then
-    sudo cp "$HOME/.cloudflared/$AI_TUNNEL_ID.json" /run/secrets/cloudflare-ai-tunnel.json
-else
-    error "AI tunnel credentials not found at $HOME/.cloudflared/$AI_TUNNEL_ID.json"
-    exit 1
-fi
-
-if [ -f "$HOME/.cloudflared/$NC_TUNNEL_ID.json" ]; then
-    sudo cp "$HOME/.cloudflared/$NC_TUNNEL_ID.json" /run/secrets/cloudflare-nextcloud-tunnel.json
-else
-    error "Nextcloud tunnel credentials not found at $HOME/.cloudflared/$NC_TUNNEL_ID.json"
-    exit 1
-fi
-
-sudo chmod 600 /run/secrets/cloudflare-*-tunnel.json
-
-# Set environment variables
-log "Setting up environment variables..."
-{
-    echo "export CLOUDFLARE_AI_TUNNEL_ID=$AI_TUNNEL_ID"
-    echo "export CLOUDFLARE_NEXTCLOUD_TUNNEL_ID=$NC_TUNNEL_ID"
-} >> ~/.bashrc
-
-# Also set for current session
-export CLOUDFLARE_AI_TUNNEL_ID=$AI_TUNNEL_ID
-export CLOUDFLARE_NEXTCLOUD_TUNNEL_ID=$NC_TUNNEL_ID
-
-# Create DNS records
-log "Creating DNS records..."
-cloudflared tunnel route dns ai-tunnel c3p0.thebennett.net
-cloudflared tunnel route dns nextcloud-tunnel scarif.thebennett.net
-
-# Start services
-log "Starting Cloudflare tunnel services..."
-sudo systemctl enable --now cloudflared-ai
-sudo systemctl enable --now cloudflared-nextcloud
-
-# Wait for services to start
-log "Waiting for services to initialize..."
-sleep 15
-
-# Pull default AI models (if Ollama is running)
-log "Setting up default AI models..."
-if systemctl is-active --quiet podman; then
+install_ai_models() {
+    log "Installing default AI models..."
+    
     # Wait for Ollama to be ready
-    timeout=30
+    timeout=60
     while ! curl -s http://localhost:11434/api/tags >/dev/null 2>&1 && [ $timeout -gt 0 ]; do
         echo "Waiting for Ollama to start... ($timeout seconds remaining)"
         sleep 5
@@ -558,164 +488,181 @@ if systemctl is-active --quiet podman; then
     done
     
     if curl -s http://localhost:11434/api/tags >/dev/null 2>&1; then
-        log "Pulling default AI models..."
-        ai-pull-model llama2 &
-        ai-pull-model codellama &
-        wait
-        log "Default models installed"
+        log "Installing lightweight models (this may take a while)..."
+        
+        # Install models in background
+        (
+            curl -X POST http://localhost:11434/api/pull -d '{"name":"llama2:7b"}' &
+            curl -X POST http://localhost:11434/api/pull -d '{"name":"codellama:7b"}' &
+            wait
+        )
+        
+        success "AI models installation started in background"
     else
-        warn "Ollama not responding. You can manually pull models later with 'ai-pull-model'"
+        warn "Ollama not responding. You can install models later with: ai-pull-model <model-name>"
     fi
-else
-    warn "Podman not running. AI services may need manual startup."
-fi
+}
 
-# Final status check
-log "Checking service status..."
-echo
-echo "Service Status:"
-echo "==============="
-if command -v ai-status &> /dev/null; then
-    ai-status
-else
-    echo "AI services: $(systemctl is-active podman || echo 'inactive')"
-fi
+check_services() {
+    log "Checking service status..."
+    
+    domain=$(cat /run/secrets/domain)
+    
+    echo
+    echo "Service Status:"
+    echo "==============="
+    
+    # Check containers
+    if sudo podman ps | grep -q ollama; then
+        echo "✅ Ollama: Running"
+    else
+        echo "❌ Ollama: Not running"
+    fi
+    
+    if sudo podman ps | grep -q open-webui; then
+        echo "✅ Open WebUI: Running"
+    else
+        echo "❌ Open WebUI: Not running"
+    fi
+    
+    # Check tunnels
+    if sudo systemctl is-active --quiet cloudflared-ai; then
+        echo "✅ AI Tunnel: Active"
+    else
+        echo "❌ AI Tunnel: Inactive"
+    fi
+    
+    if sudo systemctl is-active --quiet cloudflared-nextcloud; then
+        echo "✅ Nextcloud Tunnel: Active"
+    else
+        echo "❌ Nextcloud Tunnel: Inactive"
+    fi
+    
+    echo
+    echo "Your services should be available at:"
+    echo "🤖 AI Services: https://c3p0.$domain"
+    echo "☁️  Nextcloud:  https://scarif.$domain"
+}
 
-echo
-if command -v cf-tunnel-status &> /dev/null; then
-    cf-tunnel-status
-else
-    echo "Cloudflare tunnels:"
-    echo "  AI tunnel: $(systemctl is-active cloudflared-ai || echo 'inactive')"
-    echo "  Nextcloud tunnel: $(systemctl is-active cloudflared-nextcloud || echo 'inactive')"
-fi
+create_helper_scripts() {
+    log "Creating helper scripts..."
+    
+    # Create management script
+    sudo tee /usr/local/bin/deathstar-manage > /dev/null << 'EOF'
+#!/bin/bash
+# Deathstar Lab Management Script
 
-echo
-echo "=========================================="
-echo "  Setup Complete!"
-echo "=========================================="
-echo
-echo "Your services should be available at:"
-echo "  🤖 AI Services: https://c3p0.thebennett.net"
-echo "  ☁️  Nextcloud:   https://scarif.thebennett.net"
-echo
-echo "Useful commands:"
-echo "  ai-status              # Check AI services"
-echo "  cf-tunnel-status       # Check tunnel status"
-echo "  cf-test-endpoints      # Test connectivity"
-echo "  ai-pull-model <name>   # Download AI models"
-echo "  sudo nixos-rebuild switch  # Update system"
-echo
-echo "Troubleshooting:"
-echo "  journalctl -u cloudflared-ai       # AI tunnel logs"
-echo "  journalctl -u cloudflared-nextcloud # Nextcloud tunnel logs"
-echo "  podman ps -a                       # Container status"
-echo
-echo "May the Force be with your deployments! ⭐"
+case "$1" in
+    status)
+        echo "=== Deathstar Lab Status ==="
+        echo "Containers:"
+        sudo podman ps --format "table {{.Names}}\t{{.Status}}\t{{.Ports}}"
+        echo
+        echo "Tunnels:"
+        sudo systemctl status cloudflared-ai --no-pager -l | head -3
+        sudo systemctl status cloudflared-nextcloud --no-pager -l | head -3
+        ;;
+    restart)
+        echo "Restarting all services..."
+        sudo systemctl restart cloudflared-ai cloudflared-nextcloud
+        sudo systemctl restart podman
+        echo "Services restarted"
+        ;;
+    logs)
+        echo "=== Recent Logs ==="
+        sudo journalctl -u cloudflared-ai -n 10 --no-pager
+        sudo journalctl -u cloudflared-nextcloud -n 10 --no-pager
+        ;;
+    update)
+        echo "Updating system configuration..."
+        sudo nixos-rebuild switch
+        ;;
+    *)
+        echo "Deathstar Lab Management"
+        echo "Usage: $0 {status|restart|logs|update}"
+        echo "  status  - Show service status"
+        echo "  restart - Restart all services"
+        echo "  logs    - Show recent logs"
+        echo "  update  - Update system configuration"
+        ;;
+esac
 EOF
 
-    chmod +x /mnt/home/vader/post-install-setup.sh
-    chown 1000:1000 /mnt/home/vader/post-install-setup.sh
+    sudo chmod +x /usr/local/bin/deathstar-manage
     
-    success "Post-install script created"
+    success "Helper scripts created"
 }
 
-show_completion_message() {
+show_completion() {
+    domain=$(cat /run/secrets/domain)
+    
     echo
     echo "=========================================="
-    echo "  Installation Complete!"
+    echo "  🚀 Installation Complete! 🚀"
     echo "=========================================="
     echo
-    success "NixOS Deathstar Lab has been installed successfully!"
+    success "Your NixOS Deathstar Lab is ready!"
     echo
-    log "Next steps:"
-    echo "1. Reboot the system: sudo reboot"
-    echo "2. Login as 'vader'"
-    echo "3. Run the post-install setup: ./post-install-setup.sh"
+    echo "📱 Access your services:"
+    echo "   🤖 AI Chat:    https://c3p0.$domain"
+    echo "   ☁️  Nextcloud:  https://scarif.$domain"
     echo
-    warn "Important reminders:"
-    echo "  • Configure your Cloudflare account before running post-install"
-    echo "  • Ensure your domain (thebennett.net) is managed by Cloudflare"
-    echo "  • Test all services after setup completion"
+    echo "🔧 Management commands:"
+    echo "   deathstar-manage status   # Check all services"
+    echo "   deathstar-manage restart  # Restart services"
+    echo "   deathstar-manage logs     # View logs"
+    echo "   deathstar-manage update   # Update system"
     echo
-    echo "Configuration summary:"
-    echo "  SSD ($SSD_DEVICE): Boot + NixOS root"
-    echo "  HDD ($HDD_DEVICE): AI model storage"
-    echo "  NVME ($NVME_DEVICE): Nextcloud storage"
+    echo "🤖 AI commands:"
+    echo "   ai-status                 # Check AI services"
+    echo "   ai-pull-model llama2      # Download models"
     echo
-    echo "Service URLs (after post-install):"
-    echo "  🤖 AI Services: https://c3p0.thebennett.net"
-    echo "  ☁️  Nextcloud:   https://scarif.thebennett.net"
+    echo "🔗 Cloudflare commands:"
+    echo "   cf-tunnel-status          # Check tunnels"
+    echo "   cf-test-endpoints         # Test connectivity"
     echo
+    warn "⚠️  First-time setup notes:"
+    echo "   • AI models are downloading in the background"
+    echo "   • Nextcloud may take a few minutes to fully initialize"
+    echo "   • Check service status with: deathstar-manage status"
+    echo
+    echo "📚 Troubleshooting:"
+    echo "   • If services don't start: sudo nixos-rebuild switch"
+    echo "   • For detailed logs: journalctl -u <service-name>"
+    echo "   • Configuration files: /etc/nixos/"
+    echo
+    echo "🎉 May the Force be with your deployments!"
+    echo "=========================================="
 }
 
-# Main execution flow
+# Main execution
 main() {
+    log "Starting NixOS Deathstar Lab Easy Setup v$SCRIPT_VERSION"
+    
     # Pre-flight checks
-    check_root
-    check_nixos_installer
+    check_nixos
+    check_sudo
     check_internet
-    check_devices
     
-    # Show configuration
-    log "NixOS Deathstar Lab Setup v$SCRIPT_VERSION"
-    echo "Configuration repository: $CONFIG_REPO"
-    echo "Dry run mode: $DRY_RUN"
-    echo "Skip partitioning: $SKIP_PARTITIONING"
-    echo "Force format: $FORCE_FORMAT"
-    echo
-    
-    show_device_info
-    
-    # Confirm destructive operation
-    if [ "$SKIP_PARTITIONING" != "true" ]; then
-        confirm_destructive_operation
-    fi
-    
-    if [ "$DRY_RUN" = "true" ]; then
-        log "DRY RUN MODE - No changes will be made"
-        exit 0
-    fi
-    
-    # Disk preparation
-    unmount_all
-    
-    if [ "$SKIP_PARTITIONING" != "true" ]; then
-        partition_ssd
-        partition_hdd
-        partition_nvme
-        format_filesystems
-    fi
-    
-    verify_labels
-    mount_filesystems
-    
-    # NixOS setup
-    generate_hardware_config
-    download_configuration
+    # Setup process
+    detect_storage
+    download_configs
+    backup_existing_config
+    create_modular_config
     setup_secrets
-    create_swap
+    apply_configuration
+    setup_cloudflare_tunnels
+    start_services
+    install_ai_models
+    create_helper_scripts
+    check_services
+    show_completion
     
-    # Installation
-    install_nixos
-    setup_user
-    create_post_install_script
+    # Cleanup
+    rm -rf "$TEMP_DIR"
     
-    # Completion
-    show_completion_message
-    
-    # Optional reboot
-    echo
-    read -p "Would you like to reboot now? (y/N): " reboot_choice
-    if [[ "$reboot_choice" =~ ^[Yy]$ ]]; then
-        log "Rebooting..."
-        reboot
-    else
-        log "Remember to reboot before running the post-install script!"
-    fi
+    log "Setup completed successfully!"
 }
 
-# Script entry point
-if [[ "${BASH_SOURCE[0]}" == "${0}" ]]; then
-    main "$@"
-fi
+# Run main function
+main "$@"
