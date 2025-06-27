@@ -30,11 +30,11 @@ A comprehensive NixOS configuration for a gaming workstation with AI model hosti
 
 ```bash
 # Download the setup script
-curl -L https://raw.githubusercontent.com/yourusername/nixos-deathstar/main/setup.sh -o setup.sh
+curl -L https://raw.githubusercontent.com/auggie2lbcf/nixos-deathstar/main/setup.sh -o setup.sh
 chmod +x setup.sh
 
 # Set configuration repository (optional)
-export CONFIG_REPO="https://github.com/yourusername/nixos-deathstar.git"
+export CONFIG_REPO="https://github.com/auggie2lbcf/nixos-deathstar.git"
 
 # Run setup
 sudo ./setup.sh
